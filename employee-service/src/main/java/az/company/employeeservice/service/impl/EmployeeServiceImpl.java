@@ -7,9 +7,11 @@ import az.company.employeeservice.mapper.EmployeeMapper;
 import az.company.employeeservice.model.ApiResponseDto;
 import az.company.employeeservice.model.DepartmentDto;
 import az.company.employeeservice.model.EmployeeDto;
+import az.company.employeeservice.model.OrganizationDto;
 import az.company.employeeservice.repository.EmployeeRepository;
 import az.company.employeeservice.service.ApiClient;
 import az.company.employeeservice.service.EmployeeService;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
@@ -27,7 +29,7 @@ public class EmployeeServiceImpl implements EmployeeService {
     private final EmployeeRepository employeeRepository;
     private final EmployeeMapper employeeMapper;
     //    private final RestTemplate restTemplate;
-    //    private final WebClient webClient;
+    private final WebClient webClient;
     private final ApiClient apiClient;
 
     @Override
@@ -56,14 +58,35 @@ public class EmployeeServiceImpl implements EmployeeService {
 //        return apiResponseDto;
 //    }
 
+    @CircuitBreaker(name = "${spring.application.name}", fallbackMethod = "getDefaultDepartment")
+    @Override
+    public ApiResponseDto getEmployeeById(Long employeeId) {
+        Employee employee = employeeRepository.findById(employeeId).orElseThrow(() -> new ResourceNotFoundException("Employee", "id", employeeId));
+        DepartmentDto departmentDto = webClient.get()
+                .uri("http://localhost:8080/api/departments/" + employee.getDepartmentCode())
+                .retrieve()
+                .bodyToMono(DepartmentDto.class)
+                .block();
+
+        OrganizationDto organizationDto = webClient.get()
+                .uri("http://localhost:8083/api/organizations/" + employee.getOrganizationCode())
+                .retrieve()
+                .bodyToMono(OrganizationDto.class)
+                .block();
+
+        EmployeeDto employeeDto = employeeMapper.entityToEmployeeDto(employee);
+        ApiResponseDto apiResponseDto = new ApiResponseDto();
+        apiResponseDto.setDepartment(departmentDto);
+        apiResponseDto.setEmployee(employeeDto);
+        apiResponseDto.setOrganization(organizationDto);
+        return apiResponseDto;
+    }
+
+
 //    @Override
 //    public ApiResponseDto getEmployeeById(Long employeeId) {
 //        Employee employee = employeeRepository.findById(employeeId).orElseThrow(() -> new ResourceNotFoundException("Employee", "id", employeeId));
-//       DepartmentDto departmentDto = webClient.get()
-//                .uri("http://localhost:8080/api/departments/"+employee.getDepartmentCode())
-//                .retrieve()
-//                .bodyToMono(DepartmentDto.class)
-//                .block();
+//        DepartmentDto departmentDto = apiClient.getDepartment(employee.getDepartmentCode());
 //        EmployeeDto employeeDto = employeeMapper.entityToEmployeeDto(employee);
 //        ApiResponseDto apiResponseDto = new ApiResponseDto();
 //        apiResponseDto.setDepartment(departmentDto);
@@ -71,11 +94,12 @@ public class EmployeeServiceImpl implements EmployeeService {
 //        return apiResponseDto;
 //    }
 
-
-    @Override
-    public ApiResponseDto getEmployeeById(Long employeeId) {
+    public ApiResponseDto getDefaultDepartment(Long employeeId, Exception exception) {
         Employee employee = employeeRepository.findById(employeeId).orElseThrow(() -> new ResourceNotFoundException("Employee", "id", employeeId));
-        DepartmentDto departmentDto = apiClient.getDepartment(employee.getDepartmentCode());
+        DepartmentDto departmentDto = new DepartmentDto();
+        departmentDto.setDepartmentName("R&D department");
+        departmentDto.setDepartmentCode("R&D001");
+        departmentDto.setDepartmentDescription("Research and development department");
         EmployeeDto employeeDto = employeeMapper.entityToEmployeeDto(employee);
         ApiResponseDto apiResponseDto = new ApiResponseDto();
         apiResponseDto.setDepartment(departmentDto);
